@@ -2256,22 +2256,6 @@ protected:
     unsigned NumArgs;
   };
 
-  class DependentTemplateSpecializationTypeBitfields {
-    friend class DependentTemplateSpecializationType;
-
-    LLVM_PREFERRED_TYPE(KeywordWrapperBitfields)
-    unsigned : NumTypeWithKeywordBits;
-
-    /// The number of template arguments named in this class template
-    /// specialization, which is expected to be able to hold at least 1024
-    /// according to [implimits]. However, as this limit is somewhat easy to
-    /// hit with template metaprogramming we'd prefer to keep it as large
-    /// as possible. At the moment it has been left as a non-bitfield since
-    /// this type safely fits in 64 bits as an unsigned, so there is no reason
-    /// to introduce the performance impact of a bitfield.
-    unsigned NumArgs;
-  };
-
   class PackExpansionTypeBitfields {
     friend class PackExpansionType;
 
@@ -2352,8 +2336,6 @@ protected:
     SubstTemplateTypeParmTypeBitfields SubstTemplateTypeParmTypeBits;
     SubstPackTypeBitfields SubstPackTypeBits;
     TemplateSpecializationTypeBitfields TemplateSpecializationTypeBits;
-    DependentTemplateSpecializationTypeBitfields
-      DependentTemplateSpecializationTypeBits;
     PackExpansionTypeBitfields PackExpansionTypeBits;
     CountAttributedTypeBitfields CountAttributedTypeBits;
     PresefinedSugarTypeBitfields PredefinedSugarTypeBits;
@@ -2897,22 +2879,22 @@ public:
   /// Retrieves the CXXRecordDecl that this type refers to, either
   /// because the type is a RecordType or because it is the injected-class-name
   /// type of a class template or class template partial specialization.
-  CXXRecordDecl *getAsCXXRecordDecl() const;
-  CXXRecordDecl *castAsCXXRecordDecl() const;
+  inline CXXRecordDecl *getAsCXXRecordDecl() const;
+  inline CXXRecordDecl *castAsCXXRecordDecl() const;
 
   /// Retrieves the RecordDecl this type refers to.
-  RecordDecl *getAsRecordDecl() const;
-  RecordDecl *castAsRecordDecl() const;
+  inline RecordDecl *getAsRecordDecl() const;
+  inline RecordDecl *castAsRecordDecl() const;
 
   /// Retrieves the EnumDecl this type refers to.
-  EnumDecl *getAsEnumDecl() const;
-  EnumDecl *castAsEnumDecl() const;
+  inline EnumDecl *getAsEnumDecl() const;
+  inline EnumDecl *castAsEnumDecl() const;
 
   /// Retrieves the TagDecl that this type refers to, either
   /// because the type is a TagType or because it is the injected-class-name
   /// type of a class template or class template partial specialization.
-  TagDecl *getAsTagDecl() const;
-  TagDecl *castAsTagDecl() const;
+  inline TagDecl *getAsTagDecl() const;
+  inline TagDecl *castAsTagDecl() const;
 
   /// If this is a pointer or reference to a RecordType, return the
   /// CXXRecordDecl that the type refers to.
@@ -3533,7 +3515,9 @@ protected:
 
   AdjustedType(TypeClass TC, QualType OriginalTy, QualType AdjustedTy,
                QualType CanonicalPtr)
-      : Type(TC, CanonicalPtr, OriginalTy->getDependence(),
+      : Type(TC, CanonicalPtr,
+             AdjustedTy->getDependence() |
+                 (OriginalTy->getDependence() & ~TypeDependence::Dependent),
              /*ConstevalOnly=*/false),
         OriginalTy(OriginalTy), AdjustedTy(AdjustedTy) {}
 
@@ -7401,9 +7385,9 @@ public:
   }
 
   void Profile(llvm::FoldingSetNodeID &ID, const ASTContext &Ctx);
-  static void Profile(llvm::FoldingSetNodeID &ID, TemplateName T,
-                      ArrayRef<TemplateArgument> Args, QualType Underlying,
-                      const ASTContext &Context);
+  static void Profile(llvm::FoldingSetNodeID &ID, ElaboratedTypeKeyword Keyword,
+                      TemplateName T, ArrayRef<TemplateArgument> Args,
+                      QualType Underlying, const ASTContext &Context);
 
   static bool classof(const Type *T) {
     return T->getTypeClass() == TemplateSpecialization;
@@ -7494,57 +7478,6 @@ public:
 
   static bool classof(const Type *T) {
     return T->getTypeClass() == DependentName;
-  }
-};
-
-/// Represents a template specialization type whose template cannot be
-/// resolved, e.g.
-///   A<T>::template B<T>
-class DependentTemplateSpecializationType : public TypeWithKeyword {
-  friend class ASTContext; // ASTContext creates these
-
-  DependentTemplateStorage Name;
-
-  DependentTemplateSpecializationType(ElaboratedTypeKeyword Keyword,
-                                      const DependentTemplateStorage &Name,
-                                      ArrayRef<TemplateArgument> Args,
-                                      QualType Canon);
-
-  DependentTemplateSpecializationType(ElaboratedTypeKeyword Keyword,
-                                      const SpliceSpecifier *Splice,
-                                      ArrayRef<TemplateArgument> Args,
-                                      QualType Canon);
-
-public:
-  const DependentTemplateStorage &getDependentTemplateName() const {
-    return Name;
-  }
-
-  ArrayRef<TemplateArgument> template_arguments() const {
-    return {reinterpret_cast<const TemplateArgument *>(this + 1),
-            DependentTemplateSpecializationTypeBits.NumArgs};
-  }
-
-  bool isSugared() const { return false; }
-  QualType desugar() const { return QualType(this, 0); }
-
-  void Profile(llvm::FoldingSetNodeID &ID, const ASTContext &Context) {
-    Profile(ID, Context, getKeyword(), Name, template_arguments());
-  }
-
-  static void Profile(llvm::FoldingSetNodeID &ID, const ASTContext &Context,
-                      ElaboratedTypeKeyword Keyword,
-                      const DependentTemplateStorage &Name,
-                      ArrayRef<TemplateArgument> Args);
-
-  static void Profile(llvm::FoldingSetNodeID &ID,
-                      const ASTContext &Context,
-                      ElaboratedTypeKeyword Keyword,
-                      const SpliceSpecifier *Splice,
-                      ArrayRef<TemplateArgument> Args);
-
-  static bool classof(const Type *T) {
-    return T->getTypeClass() == DependentTemplateSpecialization;
   }
 };
 
@@ -9278,10 +9211,7 @@ inline const StreamingDiagnostic &operator<<(const StreamingDiagnostic &PD,
 
 // Helper class template that is used by Type::getAs to ensure that one does
 // not try to look through a qualified type to get to an array type.
-template <typename T>
-using TypeIsArrayType =
-    std::integral_constant<bool, std::is_same<T, ArrayType>::value ||
-                                     std::is_base_of<ArrayType, T>::value>;
+template <typename T> using TypeIsArrayType = std::is_base_of<ArrayType, T>;
 
 // Member-template getAs<specific type>'.
 template <typename T> const T *Type::getAs() const {

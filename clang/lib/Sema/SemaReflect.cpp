@@ -372,7 +372,8 @@ public:
     TemplateName TName(TD);
     // todo [merge:yukino:maybe-revert]
     return S.CheckTemplateIdType(ElaboratedTypeKeyword::None, TName,
-                                 InstantiateLoc, TAListInfo);
+                                 InstantiateLoc, TAListInfo, /*Scope=*/nullptr,
+                                 /*ForNestedNameSpecifier=*/false);
   }
 
   FunctionDecl *Substitute(FunctionTemplateDecl *TD,
@@ -402,8 +403,10 @@ public:
       TemplateArgumentListInfo TAListInfo;
       populateTemplateArgumentListInfo(TAListInfo, TArgs, InstantiateLoc);
 
-      DeclResult Result = S.CheckVarTemplateId(TD, InstantiateLoc,
-                                               InstantiateLoc, TAListInfo);
+      // todo [merge:yukino:maybe-revert]
+      DeclResult Result =
+          S.CheckVarTemplateId(TD, InstantiateLoc, InstantiateLoc, TAListInfo,
+                               /*SetWrittenArgs=*/false);
       if (Result.isInvalid())
         return nullptr;
       Spec = cast<VarTemplateSpecializationDecl>(Result.get());
@@ -1510,9 +1513,10 @@ QualType Sema::BuildReflectionSpliceType(SourceLocation TypenameKWLoc,
       for (const auto &TArg : Splice->getTemplateArgs()->arguments())
         TAListInfo.addArgument(TArg);
       // todo [merge:yukino:maybe-revert]
-      ReflectedTy = CheckTemplateIdType(ElaboratedTypeKeyword::None,
-                                        Refl.getReflectedTemplate(),
-                                        Splice->getBeginLoc(), TAListInfo);
+      ReflectedTy = CheckTemplateIdType(
+          ElaboratedTypeKeyword::None, Refl.getReflectedTemplate(),
+          Splice->getBeginLoc(), TAListInfo, /*Scope=*/nullptr,
+          /*ForNestedNameSpecifier=*/false);
       if (ReflectedTy.isNull()) {
         return QualType();
       }
@@ -1547,7 +1551,9 @@ QualType Sema::BuildReflectionSpliceType(SourceLocation TypenameKWLoc,
 
       // todo [merge:yukino:maybe-revert]
       ReflectedTy = CheckTemplateIdType(ElaboratedTypeKeyword::None, TName,
-                                        Splice->getBeginLoc(), TAListInfo);
+                                        Splice->getBeginLoc(), TAListInfo,
+                                        /*Scope=*/nullptr,
+                                        /*ForNestedNameSpecifier=*/false);
       if (ReflectedTy.isNull())
         return QualType();
     }
@@ -1879,9 +1885,10 @@ DeclContext *Sema::TryFindDeclContextOf(SpliceSpecifier *Splice) {
     for (const auto &TArg : Splice->getTemplateArgs()->arguments())
       TAListInfo.addArgument(TArg);
     // todo [merge:yukino:maybe-revert]
-    QualType QT = CheckTemplateIdType(ElaboratedTypeKeyword::None,
-                                      Refl.getReflectedTemplate(),
-                                      SourceLocation(), TAListInfo);
+    QualType QT = CheckTemplateIdType(
+        ElaboratedTypeKeyword::None, Refl.getReflectedTemplate(),
+        SourceLocation(), TAListInfo, /*Scope=*/nullptr,
+        /*ForNestedNameSpecifier=*/false);
     if (QT.isNull())
       return nullptr;
     else if (auto *RD = QT->getAsTagDecl())
